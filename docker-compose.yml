@@ -1,0 +1,75 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: zj-00005-postgres
+    environment:
+      POSTGRES_USER: dev
+      POSTGRES_PASSWORD: dev123456
+      POSTGRES_DB: db_zj_00005
+    ports:
+      - "15005:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dev -d db_zj_00005"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: zj-00005-redis
+    command: redis-server --requirepass redis123456
+    ports:
+      - "14005:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "redis123456", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: zj-00005-backend
+    environment:
+      DATABASE_URL: postgresql://dev:dev123456@postgres:5432/db_zj_00005?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: redis123456
+      JWT_SECRET: supersecretjwtkey
+      PORT: 3000
+    ports:
+      - "13005:3000"
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: zj-00005-frontend
+    environment:
+      VITE_API_BASE_URL: http://localhost:13005
+    ports:
+      - "16005:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+
+volumes:
+  postgres-data:
+  redis-data:

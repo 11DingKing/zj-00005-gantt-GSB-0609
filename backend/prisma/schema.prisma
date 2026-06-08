@@ -1,0 +1,216 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  COMPLETED
+  BLOCKED
+}
+
+enum DependencyType {
+  FS
+  SS
+  FF
+}
+
+model User {
+  id        String    @id @default(uuid())
+  username  String    @unique
+  email     String    @unique
+  password  String
+  name      String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  
+  ownedWorkspaces Workspace[]
+  memberships ProjectMember[]
+  createdProjects Project[]
+  assignedTasks TaskAssignee[]
+  sentInvites Invitation[]
+}
+
+model Workspace {
+  id        String    @id @default(uuid())
+  name      String
+  ownerId   String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  
+  owner     User      @relation(fields: [ownerId], references: [id])
+  projects  Project[]
+  
+  @@index([ownerId])
+}
+
+model Project {
+  id          String    @id @default(uuid())
+  name        String
+  description String?
+  workspaceId String
+  ownerId     String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  workspace   Workspace       @relation(fields: [workspaceId], references: [id])
+  owner       User            @relation(fields: [ownerId], references: [id])
+  members     ProjectMember[]
+  tasks       Task[]
+  milestones  Milestone[]
+  versions    Version[]
+  invitations Invitation[]
+  
+  @@index([workspaceId])
+  @@index([ownerId])
+}
+
+model ProjectMember {
+  id        String    @id @default(uuid())
+  projectId String
+  userId    String
+  role      Role
+  joinedAt  DateTime  @default(now())
+  
+  project   Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@unique([projectId, userId])
+  @@index([projectId])
+  @@index([userId])
+}
+
+model Invitation {
+  id          String    @id @default(uuid())
+  projectId   String
+  email       String
+  role        Role
+  token       String    @unique
+  invitedById String
+  createdAt   DateTime  @default(now())
+  expiresAt   DateTime
+  accepted    Boolean   @default(false)
+  
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  invitedBy User    @relation(fields: [invitedById], references: [id])
+  
+  @@index([projectId])
+  @@index([token])
+}
+
+model Task {
+  id          String    @id @default(uuid())
+  projectId   String
+  title       String
+  description String?
+  startDate   DateTime?
+  endDate     DateTime?
+  progress    Int       @default(0)
+  status      TaskStatus @default(TODO)
+  parentId    String?
+  depth       Int       @default(0)
+  orderIndex  Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  project     Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  parent      Task?             @relation("TaskChildren", fields: [parentId], references: [id], onDelete: Cascade)
+  children    Task[]            @relation("TaskChildren")
+  assignees   TaskAssignee[]
+  dependencies TaskDependency[] @relation("TaskDependencies")
+  dependents  TaskDependency[] @relation("TaskDependents")
+  milestones  MilestoneTask[]
+  
+  @@index([projectId])
+  @@index([parentId])
+}
+
+model TaskAssignee {
+  id        String    @id @default(uuid())
+  taskId    String
+  userId    String
+  createdAt DateTime  @default(now())
+  
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@unique([taskId, userId])
+  @@index([taskId])
+  @@index([userId])
+}
+
+model TaskDependency {
+  id             String         @id @default(uuid())
+  fromTaskId     String
+  toTaskId       String
+  type           DependencyType @default(FS)
+  createdAt      DateTime       @default(now())
+  
+  fromTask Task @relation("TaskDependents", fields: [fromTaskId], references: [id], onDelete: Cascade)
+  toTask   Task @relation("TaskDependencies", fields: [toTaskId], references: [id], onDelete: Cascade)
+  
+  @@unique([fromTaskId, toTaskId])
+  @@index([fromTaskId])
+  @@index([toTaskId])
+}
+
+model Milestone {
+  id          String    @id @default(uuid())
+  projectId   String
+  title       String
+  date        DateTime
+  description String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  project   Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  tasks     MilestoneTask[]
+  versions  Version[]
+  
+  @@index([projectId])
+  @@index([date])
+}
+
+model MilestoneTask {
+  id          String    @id @default(uuid())
+  milestoneId String
+  taskId      String
+  createdAt   DateTime  @default(now())
+  
+  milestone Milestone @relation(fields: [milestoneId], references: [id], onDelete: Cascade)
+  task      Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  
+  @@unique([milestoneId, taskId])
+  @@index([milestoneId])
+  @@index([taskId])
+}
+
+model Version {
+  id          String    @id @default(uuid())
+  projectId   String
+  version     String
+  milestoneId String?
+  description String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  project   Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  milestone Milestone? @relation(fields: [milestoneId], references: [id], onDelete: SetNull)
+  
+  @@unique([projectId, version])
+  @@index([projectId])
+  @@index([milestoneId])
+}
