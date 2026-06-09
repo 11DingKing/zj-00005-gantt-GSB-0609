@@ -1,9 +1,14 @@
-import { Injectable, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
-import { RedisService } from '../redis/redis.service';
-import { WebSocketGatewayService } from '../websocket/websocket.gateway';
-import { CreateTaskDto, UpdateTaskDto, UpdateTaskTimeDto } from './dto';
-import { Role, TaskStatus } from '@prisma/client';
+import {
+  Injectable,
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from "@nestjs/common";
+import { PrismaService } from "../prisma/prisma.service";
+import { RedisService } from "../redis/redis.service";
+import { WebSocketGatewayService } from "../websocket/websocket.gateway";
+import { CreateTaskDto, UpdateTaskDto, UpdateTaskTimeDto } from "./dto";
+import { Role, TaskStatus } from "@prisma/client";
 
 @Injectable()
 export class TasksService {
@@ -13,7 +18,11 @@ export class TasksService {
     private wsGateway: WebSocketGatewayService,
   ) {}
 
-  private async checkProjectAccess(userId: string, projectId: string, requireWrite: boolean = true): Promise<void> {
+  private async checkProjectAccess(
+    userId: string,
+    projectId: string,
+    requireWrite: boolean = true,
+  ): Promise<void> {
     const member = await this.prisma.projectMember.findUnique({
       where: {
         projectId_userId: { projectId, userId },
@@ -21,15 +30,20 @@ export class TasksService {
     });
 
     if (!member) {
-      throw new ForbiddenException('You do not have access to this project');
+      throw new ForbiddenException("You do not have access to this project");
     }
 
     if (requireWrite && member.role === Role.VIEWER) {
-      throw new ForbiddenException('Viewer cannot perform this action');
+      throw new ForbiddenException("Viewer cannot perform this action");
     }
   }
 
-  async findAll(userId: string, projectId: string, cursor?: string, limit: number = 50) {
+  async findAll(
+    userId: string,
+    projectId: string,
+    cursor?: string,
+    limit: number = 50,
+  ) {
     await this.checkProjectAccess(userId, projectId, false);
 
     const cached = await this.redisService.getTasks(projectId);
@@ -63,7 +77,7 @@ export class TasksService {
           },
         },
       },
-      orderBy: [{ orderIndex: 'asc' }, { createdAt: 'asc' }],
+      orderBy: [{ orderIndex: "asc" }, { createdAt: "asc" }],
       take: limit + 1,
     });
 
@@ -109,7 +123,7 @@ export class TasksService {
     });
 
     if (!task) {
-      throw new NotFoundException('Task not found');
+      throw new NotFoundException("Task not found");
     }
 
     await this.checkProjectAccess(userId, task.projectId, false);
@@ -130,18 +144,23 @@ export class TasksService {
       });
 
       if (!parentTask || parentTask.projectId !== createTaskDto.projectId) {
-        throw new BadRequestException('Invalid parent task');
+        throw new BadRequestException("Invalid parent task");
       }
 
       if (parentTask.depth >= 2) {
-        throw new BadRequestException('Maximum nesting depth (3 levels) reached');
+        throw new BadRequestException(
+          "Maximum nesting depth (3 levels) reached",
+        );
       }
 
       depth = parentTask.depth + 1;
     }
 
-    if (createTaskDto.progress && (createTaskDto.progress < 0 || createTaskDto.progress > 100)) {
-      throw new BadRequestException('Progress must be between 0 and 100');
+    if (
+      createTaskDto.progress &&
+      (createTaskDto.progress < 0 || createTaskDto.progress > 100)
+    ) {
+      throw new BadRequestException("Progress must be between 0 and 100");
     }
 
     const task = await this.prisma.task.create({
@@ -170,7 +189,11 @@ export class TasksService {
     }
 
     await this.redisService.invalidateTasks(createTaskDto.projectId);
-    await this.wsGateway.broadcastTaskEvent(createTaskDto.projectId, 'task_created', task);
+    await this.wsGateway.broadcastTaskEvent(
+      createTaskDto.projectId,
+      "task_created",
+      task,
+    );
 
     return this.findOne(userId, task.id);
   }
@@ -185,33 +208,43 @@ export class TasksService {
     });
 
     if (!existingTask) {
-      throw new NotFoundException('Task not found');
+      throw new NotFoundException("Task not found");
     }
 
     await this.checkProjectAccess(userId, existingTask.projectId);
 
-    if (updateTaskDto.progress !== undefined && (updateTaskDto.progress < 0 || updateTaskDto.progress > 100)) {
-      throw new BadRequestException('Progress must be between 0 and 100');
+    if (
+      updateTaskDto.progress !== undefined &&
+      (updateTaskDto.progress < 0 || updateTaskDto.progress > 100)
+    ) {
+      throw new BadRequestException("Progress must be between 0 and 100");
     }
 
-    if (updateTaskDto.parentId && updateTaskDto.parentId !== existingTask.parentId) {
+    if (
+      updateTaskDto.parentId &&
+      updateTaskDto.parentId !== existingTask.parentId
+    ) {
       const parentTask = await this.prisma.task.findUnique({
         where: { id: updateTaskDto.parentId },
         select: { id: true, depth: true, projectId: true, parentId: true },
       });
 
       if (!parentTask || parentTask.projectId !== existingTask.projectId) {
-        throw new BadRequestException('Invalid parent task');
+        throw new BadRequestException("Invalid parent task");
       }
 
       if (parentTask.depth >= 2) {
-        throw new BadRequestException('Maximum nesting depth (3 levels) reached');
+        throw new BadRequestException(
+          "Maximum nesting depth (3 levels) reached",
+        );
       }
 
       let checkParent = parentTask;
       while (checkParent) {
         if (checkParent.id === existingTask.id) {
-          throw new BadRequestException('Cannot create circular parent reference');
+          throw new BadRequestException(
+            "Cannot create circular parent reference",
+          );
         }
         if (checkParent.parentId) {
           checkParent = await this.prisma.task.findUnique({
@@ -255,7 +288,11 @@ export class TasksService {
     }
 
     await this.redisService.invalidateTasks(existingTask.projectId);
-    await this.wsGateway.broadcastTaskEvent(existingTask.projectId, 'task_updated', task);
+    await this.wsGateway.broadcastTaskEvent(
+      existingTask.projectId,
+      "task_updated",
+      task,
+    );
 
     return this.findOne(userId, task.id);
   }
@@ -278,7 +315,7 @@ export class TasksService {
     });
 
     if (!existingTask) {
-      throw new NotFoundException('Task not found');
+      throw new NotFoundException("Task not found");
     }
 
     await this.checkProjectAccess(userId, existingTask.projectId);
@@ -293,15 +330,25 @@ export class TasksService {
 
     const affectedTasks = [];
 
-    if (dto.autoAdjustDependents && dto.autoAdjustDependents !== 'none') {
-      affectedTasks.push(...await this.adjustDependentTasks(id, dto.startDate, dto.endDate));
+    if (dto.autoAdjustDependents && dto.autoAdjustDependents !== "none") {
+      affectedTasks.push(
+        ...(await this.adjustDependentTasks(id, dto.startDate, dto.endDate)),
+      );
     }
 
     await this.redisService.invalidateTasks(existingTask.projectId);
-    await this.wsGateway.broadcastTaskEvent(existingTask.projectId, 'task_updated', task);
+    await this.wsGateway.broadcastTaskEvent(
+      existingTask.projectId,
+      "task_updated",
+      task,
+    );
 
     for (const affected of affectedTasks) {
-      await this.wsGateway.broadcastTaskEvent(existingTask.projectId, 'task_updated', affected);
+      await this.wsGateway.broadcastTaskEvent(
+        existingTask.projectId,
+        "task_updated",
+        affected,
+      );
     }
 
     return {
@@ -311,7 +358,17 @@ export class TasksService {
     };
   }
 
-  private async adjustDependentTasks(taskId: string, newStartDate: any, newEndDate: any): Promise<any[]> {
+  private async adjustDependentTasks(
+    taskId: string,
+    newStartDate: any,
+    newEndDate: any,
+    visited: Set<string> = new Set(),
+  ): Promise<any[]> {
+    if (visited.has(taskId)) {
+      return [];
+    }
+    visited.add(taskId);
+
     const adjusted: any[] = [];
     const dependents = await this.prisma.taskDependency.findMany({
       where: { fromTaskId: taskId },
@@ -319,34 +376,57 @@ export class TasksService {
     });
 
     for (const dep of dependents) {
+      if (visited.has(dep.toTaskId)) {
+        continue;
+      }
+
       const toTask = dep.toTask;
       let shouldAdjust = false;
       let updatedStart = toTask.startDate;
       let updatedEnd = toTask.endDate;
-      const duration = toTask.startDate && toTask.endDate
-        ? toTask.endDate.getTime() - toTask.startDate.getTime()
-        : 0;
+      const duration =
+        toTask.startDate && toTask.endDate
+          ? toTask.endDate.getTime() - toTask.startDate.getTime()
+          : 0;
 
-      if (dep.type === 'FS') {
-        if (toTask.startDate && newEndDate && new Date(toTask.startDate) <= new Date(newEndDate)) {
-          updatedStart = new Date(new Date(newEndDate).getTime() + 86400000);
+      if (dep.type === "FS") {
+        if (
+          toTask.startDate &&
+          newEndDate &&
+          new Date(toTask.startDate) <= new Date(newEndDate)
+        ) {
+          const nextDay = new Date(newEndDate);
+          nextDay.setDate(nextDay.getDate() + 1);
+          updatedStart = nextDay;
           shouldAdjust = true;
         }
-      } else if (dep.type === 'SS') {
-        if (toTask.startDate && newStartDate && new Date(toTask.startDate) < new Date(newStartDate)) {
+      } else if (dep.type === "SS") {
+        if (
+          toTask.startDate &&
+          newStartDate &&
+          new Date(toTask.startDate) < new Date(newStartDate)
+        ) {
           updatedStart = newStartDate;
           shouldAdjust = true;
         }
-      } else if (dep.type === 'FF') {
-        if (toTask.endDate && newEndDate && new Date(toTask.endDate) < new Date(newEndDate)) {
+      } else if (dep.type === "FF") {
+        if (
+          toTask.endDate &&
+          newEndDate &&
+          new Date(toTask.endDate) < new Date(newEndDate)
+        ) {
           updatedEnd = newEndDate;
           shouldAdjust = true;
         }
       }
 
       if (shouldAdjust) {
-        if (updatedStart && duration > 0 && dep.type !== 'FF') {
-          updatedEnd = new Date(new Date(updatedStart).getTime() + duration);
+        if (duration > 0) {
+          if (dep.type === "FF") {
+            updatedStart = new Date(new Date(updatedEnd).getTime() - duration);
+          } else {
+            updatedEnd = new Date(new Date(updatedStart).getTime() + duration);
+          }
         }
 
         const updatedTask = await this.prisma.task.update({
@@ -355,7 +435,14 @@ export class TasksService {
         });
 
         adjusted.push(updatedTask);
-        adjusted.push(...await this.adjustDependentTasks(toTask.id, updatedStart, updatedEnd));
+        adjusted.push(
+          ...(await this.adjustDependentTasks(
+            toTask.id,
+            updatedStart,
+            updatedEnd,
+            visited,
+          )),
+        );
       }
     }
 
@@ -369,7 +456,7 @@ export class TasksService {
     });
 
     if (!task) {
-      throw new NotFoundException('Task not found');
+      throw new NotFoundException("Task not found");
     }
 
     await this.checkProjectAccess(userId, task.projectId);
@@ -377,8 +464,10 @@ export class TasksService {
     await this.prisma.task.delete({ where: { id } });
 
     await this.redisService.invalidateTasks(task.projectId);
-    await this.wsGateway.broadcastTaskEvent(task.projectId, 'task_deleted', { id });
+    await this.wsGateway.broadcastTaskEvent(task.projectId, "task_deleted", {
+      id,
+    });
 
-    return { message: 'Task deleted successfully' };
+    return { message: "Task deleted successfully" };
   }
 }
