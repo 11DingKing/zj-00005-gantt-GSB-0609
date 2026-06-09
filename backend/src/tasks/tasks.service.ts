@@ -311,43 +311,68 @@ export class TasksService {
     };
   }
 
-  private async adjustDependentTasks(taskId: string, newStartDate: any, newEndDate: any): Promise<any[]> {
+  private async adjustDependentTasks(
+    taskId: string,
+    newStartDate: any,
+    newEndDate: any,
+    visited: Set<string> = new Set()
+  ): Promise<any[]> {
+    if (visited.has(taskId)) {
+      return [];
+    }
+    visited.add(taskId);
+
     const adjusted: any[] = [];
     const dependents = await this.prisma.taskDependency.findMany({
       where: { fromTaskId: taskId },
       include: { toTask: true },
     });
 
+    const newStartTimestamp = newStartDate ? new Date(newStartDate).getTime() : null;
+    const newEndTimestamp = newEndDate ? new Date(newEndDate).getTime() : null;
+
     for (const dep of dependents) {
       const toTask = dep.toTask;
+      
+      if (visited.has(toTask.id)) {
+        continue;
+      }
+
       let shouldAdjust = false;
-      let updatedStart = toTask.startDate;
-      let updatedEnd = toTask.endDate;
+      let updatedStartTimestamp = toTask.startDate ? toTask.startDate.getTime() : null;
+      let updatedEndTimestamp = toTask.endDate ? toTask.endDate.getTime() : null;
       const duration = toTask.startDate && toTask.endDate
         ? toTask.endDate.getTime() - toTask.startDate.getTime()
         : 0;
 
       if (dep.type === 'FS') {
-        if (toTask.startDate && newEndDate && new Date(toTask.startDate) <= new Date(newEndDate)) {
-          updatedStart = new Date(new Date(newEndDate).getTime() + 86400000);
+        if (toTask.startDate && newEndTimestamp !== null && updatedStartTimestamp! <= newEndTimestamp) {
+          updatedStartTimestamp = newEndTimestamp;
           shouldAdjust = true;
         }
       } else if (dep.type === 'SS') {
-        if (toTask.startDate && newStartDate && new Date(toTask.startDate) < new Date(newStartDate)) {
-          updatedStart = newStartDate;
+        if (toTask.startDate && newStartTimestamp !== null && updatedStartTimestamp! < newStartTimestamp) {
+          updatedStartTimestamp = newStartTimestamp;
           shouldAdjust = true;
         }
       } else if (dep.type === 'FF') {
-        if (toTask.endDate && newEndDate && new Date(toTask.endDate) < new Date(newEndDate)) {
-          updatedEnd = newEndDate;
+        if (toTask.endDate && newEndTimestamp !== null && updatedEndTimestamp! < newEndTimestamp) {
+          updatedEndTimestamp = newEndTimestamp;
           shouldAdjust = true;
         }
       }
 
       if (shouldAdjust) {
-        if (updatedStart && duration > 0 && dep.type !== 'FF') {
-          updatedEnd = new Date(new Date(updatedStart).getTime() + duration);
+        if (duration > 0) {
+          if (dep.type === 'FF') {
+            updatedStartTimestamp = updatedEndTimestamp! - duration;
+          } else {
+            updatedEndTimestamp = updatedStartTimestamp! + duration;
+          }
         }
+
+        const updatedStart = updatedStartTimestamp ? new Date(updatedStartTimestamp) : null;
+        const updatedEnd = updatedEndTimestamp ? new Date(updatedEndTimestamp) : null;
 
         const updatedTask = await this.prisma.task.update({
           where: { id: toTask.id },
@@ -355,7 +380,7 @@ export class TasksService {
         });
 
         adjusted.push(updatedTask);
-        adjusted.push(...await this.adjustDependentTasks(toTask.id, updatedStart, updatedEnd));
+        adjusted.push(...await this.adjustDependentTasks(toTask.id, updatedStart, updatedEnd, visited));
       }
     }
 
